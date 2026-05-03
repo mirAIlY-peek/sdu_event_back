@@ -2,13 +2,12 @@ import json
 import os
 import shutil
 from datetime import datetime
+from threading import Thread
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import firebase_admin
 from firebase_admin import credentials, firestore as fs
@@ -190,29 +189,53 @@ def _update_or_create_vectorstore(
 
 
 
-@app.on_event("startup")
-def load_data():
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    )
-    llm = _build_llm()
+def initialize_ai():
+    try:
+        print("⏳ Loading embeddings...")
 
-    if not os.path.exists(CHROMA_DIR):
-        print("⏳ Creating vector DB from FAQ JSON...")
-        documents = _load_faq_documents()
-        
-        vectorstore = _update_or_create_vectorstore(documents, embeddings)
-    else:
-        print("✅ Loading vector DB from disk...")
-        vectorstore = Chroma(
-            persist_directory=CHROMA_DIR, embedding_function=embeddings
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
         )
 
-    app.state.embeddings = embeddings
-    app.state.llm = llm
-    app.state.vectorstore = vectorstore
-    app.state.rag_chain = _make_rag_chain(vectorstore, llm)
-    print("🔥 UniBuddy ready!")
+        print("⏳ Loading LLM...")
+        llm = _build_llm()
+
+        if not os.path.exists(CHROMA_DIR):
+            print("⏳ Creating vector DB...")
+            documents = _load_faq_documents()
+
+            vectorstore = _update_or_create_vectorstore(
+                documents,
+                embeddings,
+            )
+        else:
+            print("✅ Loading existing vector DB...")
+            vectorstore = Chroma(
+                persist_directory=CHROMA_DIR,
+                embedding_function=embeddings,
+            )
+
+        app.state.embeddings = embeddings
+        app.state.llm = llm
+        app.state.vectorstore = vectorstore
+        app.state.rag_chain = _make_rag_chain(vectorstore, llm)
+
+        print("🔥 UniBuddy AI Ready!")
+
+    except Exception as e:
+        print(f"❌ Startup Error: {e}")
+
+
+@app.on_event("startup")
+async def startup_event():
+    app.state.embeddings = None
+    app.state.llm = None
+    app.state.vectorstore = None
+    app.state.rag_chain = None
+
+    Thread(target=initialize_ai, daemon=True).start()
+
+    print("🚀 FastAPI server started")
 
 
 
@@ -293,6 +316,12 @@ async def ask_unibuddy(request: QueryRequest):
         "sources": unique_sources,
     }
 
+@app.get("/")
+async def root():
+    return {
+        "status": "online",
+        "ai_ready": app.state.rag_chain is not None,
+    }
 
 @app.post("/recommend")
 async def recommend(request: RecommendRequest):
