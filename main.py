@@ -17,10 +17,10 @@ from pydantic import BaseModel, Field
 
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
-from langchain_classic.chains import create_retrieval_chain
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 
 
@@ -157,7 +157,7 @@ def _make_rag_chain(vectorstore: Chroma, llm: ChatOpenAI):
 
 
 def _update_or_create_vectorstore(
-    documents: list[Document], embeddings: HuggingFaceEmbeddings, existing_vectorstore: Chroma = None
+    documents: list[Document], embeddings: OpenAIEmbeddings, existing_vectorstore: Chroma = None
 ) -> Chroma:
     """Безопасно обновляет или создает ChromaDB, избегая блокировок файлов в Windows."""
     if existing_vectorstore is not None:
@@ -192,13 +192,19 @@ def _update_or_create_vectorstore(
 def initialize_ai():
     try:
         print("⏳ Loading embeddings...")
-
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        embeddings = OpenAIEmbeddings(
+            api_key=OPENROUTER_API_KEY,
+            openai_api_base="https://openrouter.ai/api/v1",
+            model="openai/text-embedding-3-small",
         )
 
         print("⏳ Loading LLM...")
         llm = _build_llm()
+
+        # Всегда создаём заново — Render не хранит файлы между деплоями
+        print("⏳ Creating vector DB...")
+        documents = _load_faq_documents()
+        vectorstore = _update_or_create_vectorstore(documents, embeddings)
 
         if not os.path.exists(CHROMA_DIR):
             print("⏳ Creating vector DB...")
@@ -251,7 +257,7 @@ def sync_rag(x_api_key: str | None = Header(default=None)):
     """
     _verify_sync_key(x_api_key)
 
-    embeddings: HuggingFaceEmbeddings = app.state.embeddings
+    embeddings: OpenAIEmbeddings = app.state.embeddings
     llm: ChatOpenAI = app.state.llm
     current_vectorstore: Chroma = app.state.vectorstore # Берем текущий объект
 
