@@ -19,8 +19,8 @@ from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains.retrieval import create_retrieval_chain
+from langchain.chains.combine_documents.stuff import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 
 
@@ -201,25 +201,9 @@ def initialize_ai():
         print("⏳ Loading LLM...")
         llm = _build_llm()
 
-        # Всегда создаём заново — Render не хранит файлы между деплоями
         print("⏳ Creating vector DB...")
         documents = _load_faq_documents()
         vectorstore = _update_or_create_vectorstore(documents, embeddings)
-
-        if not os.path.exists(CHROMA_DIR):
-            print("⏳ Creating vector DB...")
-            documents = _load_faq_documents()
-
-            vectorstore = _update_or_create_vectorstore(
-                documents,
-                embeddings,
-            )
-        else:
-            print("✅ Loading existing vector DB...")
-            vectorstore = Chroma(
-                persist_directory=CHROMA_DIR,
-                embedding_function=embeddings,
-            )
 
         app.state.embeddings = embeddings
         app.state.llm = llm
@@ -229,7 +213,8 @@ def initialize_ai():
         print("🔥 UniBuddy AI Ready!")
 
     except Exception as e:
-        print(f"❌ Startup Error: {e}")
+        print(f"❌ Startup Error: {e}", flush=True)
+        import traceback; traceback.print_exc()
 
 
 @app.on_event("startup")
